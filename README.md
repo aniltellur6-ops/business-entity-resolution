@@ -1,0 +1,20 @@
+# Business Entity Resolution Project
+
+A comprehensive ML pipeline for standardizing, blocking, and matching business entity records across multiple sources using advanced fuzzy string metrics and LightGBM.
+
+## Pipeline Architecture
+1. **Data Normalization**: Handles Unicode standardization, removes uninformative terms, parses legal suffixes (e.g. SARL, GmbH), and extracts structured address fields (postal codes, house numbers).
+2. **Blocking & Candidate Generation**: Generates candidate pairs efficiently using TF-IDF + Approximate Nearest Neighbors (ANN), Postal blocking, and Token blocking.
+3. **Feature Engineering**: Generates deep textual similarity features (Levenshtein, Jaro-Winkler, Token Jaccard, TF-IDF cosine similarity, Token Sort) for both business names and addresses.
+4. **Machine Learning Model**: LightGBM binary classifier trained on the extracted features.
+5. **Threshold Optimization**: Optimizes the probability threshold against the competition's per-entity macro-averaged F0.5 metric.
+
+## Requirements
+See `code/business_entity_resolution/requirements.txt`
+
+## Running the Pipeline
+Place `train_source1.tsv`, `train_source2.tsv`, `train_source3.tsv`, and `train_ground_truth.tsv` into the `data/` directory.
+
+```bash
+python code/business_entity_resolution/src/pipeline.py
+```
