@@ -11,26 +11,17 @@ def evaluate_blocking_recall(candidates_df: pd.DataFrame, ground_truth_df: pd.Da
         logger.warning("Ground truth is empty. Cannot evaluate recall.")
         return {}
         
-    # Assume ground truth has columns: source1_entity_id, source2_entity_ids, source3_entity_ids
-    # We need to melt it into pairwise matches
     true_pairs = []
     
     for _, row in ground_truth_df.iterrows():
         s1 = row.get('source1_entity_id')
+        matched_ids = row.get('matched_entity_ids', '')
         
-        # S2
-        s2_ids = row.get('source2_entity_ids', '')
-        if pd.notna(s2_ids) and s2_ids:
-            for s2 in s2_ids.split(','):
-                if s2.strip():
-                    true_pairs.append({'s1_id': s1, 'candidate_id': s2.strip()})
-                    
-        # S3
-        s3_ids = row.get('source3_entity_ids', '')
-        if pd.notna(s3_ids) and s3_ids:
-            for s3 in s3_ids.split(','):
-                if s3.strip():
-                    true_pairs.append({'s1_id': s1, 'candidate_id': s3.strip()})
+        if pd.notna(matched_ids) and matched_ids:
+            for match in str(matched_ids).split(','):
+                match = match.strip()
+                if match:
+                    true_pairs.append({'s1_id': s1, 'candidate_id': match})
                     
     true_pairs_df = pd.DataFrame(true_pairs)
     if true_pairs_df.empty:
@@ -39,7 +30,6 @@ def evaluate_blocking_recall(candidates_df: pd.DataFrame, ground_truth_df: pd.Da
     total_true = len(true_pairs_df)
     
     # Merge candidates with true pairs
-    # candidates_df should have s1_id and candidate_id
     found_df = pd.merge(true_pairs_df, candidates_df[['s1_id', 'candidate_id']], 
                         on=['s1_id', 'candidate_id'], how='inner')
                         

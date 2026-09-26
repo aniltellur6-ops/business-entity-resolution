@@ -37,13 +37,13 @@ def apply_normalization(df: pd.DataFrame) -> pd.DataFrame:
         
         # Extract structured fields
         result_df['postal_code'] = result_df['address'].apply(
-            lambda x: extract_postal_code(str(x)) if pd.notna(x) else None
+            lambda x: extract_postal_code(str(x)) if pd.notna(x) else ""
         )
         result_df['house_number'] = result_df['address'].apply(
-            lambda x: extract_house_number(str(x)) if pd.notna(x) else None
+            lambda x: extract_house_number(str(x)) if pd.notna(x) else ""
         )
         result_df['city_extracted'] = result_df['address'].apply(
-            lambda x: extract_city(str(x)) if pd.notna(x) else None
+            lambda x: extract_city(str(x)) if pd.notna(x) else ""
         )
         
     return result_df
@@ -56,15 +56,11 @@ def create_true_pairs_set(ground_truth_df: pd.DataFrame) -> set:
     true_pairs = set()
     for _, row in ground_truth_df.iterrows():
         s1 = row.get('source1_entity_id')
-        s2_ids = row.get('source2_entity_ids', '')
-        if pd.notna(s2_ids) and s2_ids:
-            for s2 in s2_ids.split(','):
-                if s2.strip(): true_pairs.add((s1, s2.strip()))
-        
-        s3_ids = row.get('source3_entity_ids', '')
-        if pd.notna(s3_ids) and s3_ids:
-            for s3 in s3_ids.split(','):
-                if s3.strip(): true_pairs.add((s1, s3.strip()))
+        matched_ids = row.get('matched_entity_ids', '')
+        if pd.notna(matched_ids) and matched_ids:
+            for match in str(matched_ids).split(','):
+                match = match.strip()
+                if match: true_pairs.add((s1, match))
                 
     return true_pairs
 
@@ -96,19 +92,43 @@ def main():
     candidates = generator.generate_candidates(s1_norm, s2_norm, s3_norm)
     
     # 4. Enrich Candidates for Despo's Feature Engineering
-    logger.info("Enriching candidates with raw text for ML feature engineering...")
-    s1_names = dict(zip(s1_norm['id'], s1_norm['normalized_name']))
-    s2_names = dict(zip(s2_norm['id'], s2_norm['normalized_name']))
-    s3_names = dict(zip(s3_norm['id'], s3_norm['normalized_name']))
+    logger.info("Enriching candidates with raw text and structured fields for ML feature engineering...")
     
-    candidates['name_1'] = candidates['s1_id'].map(s1_names)
+    def build_lookup(df):
+        df_copy = df.copy()
+        if 'country' not in df_copy.columns:
+            df_copy['country'] = ""
+        # Make a dictionary mapping ID to all required fields
+        return df_copy.set_index('id')[['normalized_name', 'normalized_address', 'country', 'postal_code', 'house_number', 'legal_suffix']].to_dict('index')
+
+    s1_lookup = build_lookup(s1_norm)
+    s2_lookup = build_lookup(s2_norm)
+    s3_lookup = build_lookup(s3_norm)
     
-    def get_other_name(row):
-        if row['source'] == 's2': return s2_names.get(row['candidate_id'], '')
-        elif row['source'] == 's3': return s3_names.get(row['candidate_id'], '')
-        return ''
-        
-    candidates['name_2'] = candidates.apply(get_other_name, axis=1)
+    # Default empty dict
+    default_row = {'normalized_name': '', 'normalized_address': '', 'country': '', 'postal_code': '', 'house_number': '', 'legal_suffix': ''}
+    
+    # Add S1 features
+    s1_data = candidates['s1_id'].map(lambda x: s1_lookup.get(x, default_row))
+    candidates['name_1'] = s1_data.apply(lambda x: x.get('normalized_name'))
+    candidates['address_1'] = s1_data.apply(lambda x: x.get('normalized_address'))
+    candidates['country_1'] = s1_data.apply(lambda x: x.get('country'))
+    candidates['postal_1'] = s1_data.apply(lambda x: x.get('postal_code'))
+    candidates['house_num_1'] = s1_data.apply(lambda x: x.get('house_number'))
+    candidates['legal_suffix_1'] = s1_data.apply(lambda x: x.get('legal_suffix'))
+
+    def get_other_data(row):
+        if row['source'] == 's2': return s2_lookup.get(row['candidate_id'], default_row)
+        elif row['source'] == 's3': return s3_lookup.get(row['candidate_id'], default_row)
+        return default_row
+
+    other_data = candidates.apply(get_other_data, axis=1)
+    candidates['name_2'] = other_data.apply(lambda x: x.get('normalized_name'))
+    candidates['address_2'] = other_data.apply(lambda x: x.get('normalized_address'))
+    candidates['country_2'] = other_data.apply(lambda x: x.get('country'))
+    candidates['postal_2'] = other_data.apply(lambda x: x.get('postal_code'))
+    candidates['house_num_2'] = other_data.apply(lambda x: x.get('house_number'))
+    candidates['legal_suffix_2'] = other_data.apply(lambda x: x.get('legal_suffix'))
     
     # Add labels if we have ground truth
     if gt_df is not None and not gt_df.empty:
