@@ -1,9 +1,9 @@
-# Business Entity Resolution Pipeline
+# Business Entity Resolution Pipeline (Shriyash's Part)
 
-This repository contains the solution for the Business Entity Resolution project.
+This repository contains Shriyash's part of the solution for the Business Entity Resolution project, which focuses on Data Exploration, Normalization, Blocking, and Candidate Generation.
 
 ## Overview
-The system takes a clean list of businesses (Source 1) and intelligently finds which noisy records across two other datasets (Source 2, Source 3) represent the same real-world businesses, while minimizing false merges and remaining robust to unseen countries and formatting patterns.
+The system takes a clean list of businesses (Source 1) and intelligently finds which noisy records across two other datasets (Source 2, Source 3) represent the same real-world businesses. This part of the pipeline handles parsing the data, normalizing it to be country-agnostic, and generating a high-recall candidate set.
 
 ## Reproduction Steps
 
@@ -22,12 +22,7 @@ The system takes a clean list of businesses (Source 1) and intelligently finds w
    ```
    This will:
    - Load and normalize the data
-   - Generate candidates
-   - Run feature engineering
-   - Execute model inference
-   - Generate `candidate_pairs.tsv` and `matching_results.tsv` in the `output/` directory.
+   - Generate candidate pairs using multiple blocking strategies (TF-IDF, Token, Postal)
+   - Generate `candidate_pairs.tsv` in the `output/` directory.
 
-4. **Run validator:**
-   ```bash
-   python utils/validate_submission.py
-   ```
+   *(Note: Feature engineering, model inference, and `matching_results.tsv` generation will be handled downstream in the model pipeline)*
