@@ -7,6 +7,7 @@ from normalization.name_normalizer import normalize_business_name
 from normalization.address_normalizer import normalize_address
 from normalization.structured_fields import extract_postal_code, extract_house_number, extract_city
 from blocking.candidate_generator import CandidateGenerator
+from blocking.blocking_recall import evaluate_blocking_recall
 import config
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,12 +15,11 @@ logger = logging.getLogger(__name__)
 
 def apply_normalization(df: pd.DataFrame) -> pd.DataFrame:
     """Applies all normalization and extraction to a dataframe."""
-    if df.empty:
+    if df is None or df.empty:
         return df
         
     logger.info(f"Normalizing {len(df)} records...")
     
-    # We create a new dataframe to hold the normalized fields to avoid modifying original
     result_df = df.copy()
     
     if 'business_name' in result_df.columns:
@@ -48,18 +48,39 @@ def apply_normalization(df: pd.DataFrame) -> pd.DataFrame:
         
     return result_df
 
+def create_true_pairs_set(ground_truth_df: pd.DataFrame) -> set:
+    """Creates a set of true matching pairs (s1_id, candidate_id)."""
+    if ground_truth_df is None or ground_truth_df.empty:
+        return set()
+    
+    true_pairs = set()
+    for _, row in ground_truth_df.iterrows():
+        s1 = row.get('source1_entity_id')
+        s2_ids = row.get('source2_entity_ids', '')
+        if pd.notna(s2_ids) and s2_ids:
+            for s2 in s2_ids.split(','):
+                if s2.strip(): true_pairs.add((s1, s2.strip()))
+        
+        s3_ids = row.get('source3_entity_ids', '')
+        if pd.notna(s3_ids) and s3_ids:
+            for s3 in s3_ids.split(','):
+                if s3.strip(): true_pairs.add((s1, s3.strip()))
+                
+    return true_pairs
+
 def main():
     logger.info("Starting Business Entity Resolution Pipeline (Shriyash's part)")
     
     # 1. Load Data
     loader = DataLoader(config.DATA_DIR)
-    # Using test sets as example of what would run for inference
-    # In practice, you might run train for blocking recall experiments
-    datasets = loader.load_all_test() 
+    
+    # Assuming we are running training mode right now to pass to Despo's model
+    datasets = loader.load_all_train() 
     
     s1_df = datasets.get("source1")
     s2_df = datasets.get("source2")
     s3_df = datasets.get("source3")
+    gt_df = datasets.get("ground_truth")
     
     if s1_df.empty or s2_df.empty or s3_df.empty:
         logger.error("One or more datasets could not be loaded. Please ensure data is in data/ directory.")
@@ -74,15 +95,45 @@ def main():
     generator = CandidateGenerator()
     candidates = generator.generate_candidates(s1_norm, s2_norm, s3_norm)
     
-    # 4. Save candidate pairs
+    # 4. Enrich Candidates for Despo's Feature Engineering
+    logger.info("Enriching candidates with raw text for ML feature engineering...")
+    s1_names = dict(zip(s1_norm['id'], s1_norm['normalized_name']))
+    s2_names = dict(zip(s2_norm['id'], s2_norm['normalized_name']))
+    s3_names = dict(zip(s3_norm['id'], s3_norm['normalized_name']))
+    
+    candidates['name_1'] = candidates['s1_id'].map(s1_names)
+    
+    def get_other_name(row):
+        if row['source'] == 's2': return s2_names.get(row['candidate_id'], '')
+        elif row['source'] == 's3': return s3_names.get(row['candidate_id'], '')
+        return ''
+        
+    candidates['name_2'] = candidates.apply(get_other_name, axis=1)
+    
+    # Add labels if we have ground truth
+    if gt_df is not None and not gt_df.empty:
+        logger.info("Adding ground truth labels to candidate pairs...")
+        true_pairs = create_true_pairs_set(gt_df)
+        candidates['label'] = candidates.apply(
+            lambda x: 1 if (x['s1_id'], x['candidate_id']) in true_pairs else 0, axis=1
+        )
+        
+        # Log recall
+        evaluate_blocking_recall(candidates, gt_df)
+    
+    # 5. Save candidate pairs
     output_file = config.OUTPUT_DIR / "candidate_pairs.tsv"
     candidates.to_csv(output_file, sep="\t", index=False)
     logger.info(f"Saved {len(candidates)} candidate pairs to {output_file}")
     
-    # Note: Feature engineering, model inference, and aggregation are Despo's part.
-    # The pipeline would continue here by loading the candidates and generating matching_results.tsv.
-    
-    logger.info("Shriyash's part of the pipeline completed.")
+    # 6. Model Training (Despo's Pipeline)
+    try:
+        from model.train_model import main as train_model_main
+        if 'label' in candidates.columns:
+            logger.info("Triggering Model Training pipeline...")
+            train_model_main()
+    except ImportError:
+        logger.warning("Despo's model training pipeline not found or not importable.")
 
 if __name__ == "__main__":
     main()
