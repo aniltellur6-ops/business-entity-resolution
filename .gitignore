@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.env
+*.pem
+data/
+models/*.bin
+models/*.pkl
+logs/
+tmp/
+.aws/
